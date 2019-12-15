@@ -1,6 +1,0 @@
-ARG FROM_IMAGE
-FROM $FROM_IMAGE:latest
-COPY yuri-requirements.txt /tmp/
-RUN pip install -r /tmp/yuri-requirements.txt
-ADD scripts/yuri /
-ENTRYPOINT ["/yuri"]
