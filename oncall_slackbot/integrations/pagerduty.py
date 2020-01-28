@@ -60,3 +60,4 @@ def get_current_oncall() -> Optional[Oncall]:
         break
     if not current_oncall:
         return None
+    return current_oncall
