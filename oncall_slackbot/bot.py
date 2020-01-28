@@ -32,8 +32,6 @@ class OnCallBot(bot.Bot):
 def nlp_label_respond_to(match_label, flags=0):
     def wrapper(func):
         if nlp.is_backend_present():
-            if 'nlp_label_respond_to' not in manager.PluginsManager.commands:
-                manager.PluginsManager.commands['nlp_label_respond_to'] = {}
             manager.PluginsManager.commands['nlp_label_respond_to'][re.compile(match_label, flags)] = func
             logger.info(f'registered nlp_label_respond_to plugin "{func.__name__}" to "{match_label}"')
         else:
@@ -46,8 +44,6 @@ def nlp_label_respond_to(match_label, flags=0):
 def nlp_label_listen_to(match_label, flags=0):
     def wrapper(func):
         if nlp.is_backend_present():
-            if 'nlp_label_listen_to' not in manager.PluginsManager.commands:
-                manager.PluginsManager.commands['nlp_label_listen_to'] = {}
             manager.PluginsManager.commands['nlp_label_listen_to'][re.compile(match_label, flags)] = func
             logger.info(f'registered nlp_label_listen_to plugin "{func.__name__}" to "{match_label}"')
         else:
@@ -55,3 +51,10 @@ def nlp_label_listen_to(match_label, flags=0):
         return func
 
     return wrapper
+
+
+if nlp.is_backend_present():
+    if 'nlp_label_respond_to' not in manager.PluginsManager.commands:
+        manager.PluginsManager.commands['nlp_label_respond_to'] = {}
+    if 'nlp_label_listen_to' not in manager.PluginsManager.commands:
+        manager.PluginsManager.commands['nlp_label_listen_to'] = {}
