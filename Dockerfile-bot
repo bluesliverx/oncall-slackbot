@@ -1,4 +1,5 @@
 ARG FROM_IMAGE
 FROM $FROM_IMAGE:latest
 ADD run.py /
+RUN chmod +x /run.py
 ENTRYPOINT ["/run.py"]
