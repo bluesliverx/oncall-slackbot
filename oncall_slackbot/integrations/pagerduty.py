@@ -38,13 +38,13 @@ def get_humanized_datetime(datetime_string: str, dest_time_zone_str: Optional[st
     parsed = datetime.strptime(datetime_string, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=UTC)
     if dest_time_zone_str:
         dest_time_zone = timezone(dest_time_zone_str)
-        parsed = parsed.replace(tzinfo=dest_time_zone)
+        parsed = parsed.astimezone(dest_time_zone)
     else:
         dest_time_zone = UTC
     result = humanize.naturaldate(parsed)
     if result != 'today':
         return result
-    return humanize.naturaltime(parsed - datetime.now(dest_time_zone))
+    return humanize.naturaltime(datetime.now(dest_time_zone) - parsed)
 
 
 def get_current_oncall() -> Optional[Oncall]:
