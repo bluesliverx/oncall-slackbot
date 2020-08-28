@@ -64,3 +64,12 @@ This is the same directory that was generated using yuri or by manually training
 #### Use nlp responders in your plugins
 
 See the `slackbot/plugins/nlp.py` file for examples of using NLP in your plugins.
+
+
+# Releasing new versions
+
+To release a new version of this library, install `bump2version` into a virtualenv, and then
+call `bump2version <part>` where part is `major`, `minor`, or `patch` to update a certain part
+of the version number. Then push the tag and the master branch. The tagged version will be
+built on travis-ci.org and released to pypi and docker.
+
