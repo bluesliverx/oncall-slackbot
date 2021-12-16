@@ -25,7 +25,7 @@ class OnCallMessageDispatcher(dispatcher.MessageDispatcher):
         category = msg[0]
         msg = msg[1]
         if not self._dispatch_msg_handler_override(category, msg, override_match_text):
-            #TODO Fix this for both nlp and non-nlp responds. For now I'm leaving it as the default behavior
+            # TODO Fix this for both nlp and non-nlp responds. For now I'm leaving it as the default behavior
             #   of only handling non-nlp responds for the default reply
             # Send the default reply if nlp doesn't respond with anything
             # and there is an nlp label and this is for an nlp label match

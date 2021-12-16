@@ -1,8 +1,23 @@
-from os.path import join, dirname
 import os
+import subprocess
 from setuptools import setup, find_packages
 
-__version__ = open(join(dirname(__file__), 'oncall_slackbot/VERSION')).read().strip()
+
+MAJOR_VERSION = '1'
+
+version_file = os.path.join(os.path.dirname(__file__), 'oncall_slackbot/VERSION')
+if os.path.exists(version_file):
+    # Read version from file
+    with open(version_file, 'r', encoding='utf8') as fobj:
+        version = fobj.read().strip()
+else:
+    # Generate the version and store it in the file
+    result = subprocess.run('git rev-list --count HEAD', shell=True, capture_output=True, encoding='utf8')
+    commit_count = result.stdout.strip()
+    version = f'{MAJOR_VERSION}.{commit_count}'
+    print(f'Setting version to {version} and writing to {version_file}')
+    with open(version_file, 'w', encoding='utf8') as fobj:
+        fobj.write(version)
 
 install_requires = (
     'slackbot==0.5.5',
@@ -18,7 +33,7 @@ excludes = (
 ) # yapf: disable
 
 setup(name='oncall-slackbot',
-      version=__version__,
+      version=version,
       license='MIT',
       description='Extended slackbot made specifically to handle on-call requests',
       author='Brian Saville',

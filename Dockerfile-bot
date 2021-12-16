@@ -1,5 +1,4 @@
-ARG FROM_IMAGE
-FROM $FROM_IMAGE:latest
+FROM ghcr.io/bksaville/oncall-slackbot:latest
 ADD run.py /
 RUN chmod +x /run.py
 ENTRYPOINT ["/run.py"]

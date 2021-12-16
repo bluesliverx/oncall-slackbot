@@ -1,0 +1,136 @@
+name: Build
+on:
+  - push
+  - pull_request
+jobs:
+  test:
+    if: github.repository == 'bluesliverx/oncall-slackbot'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+#      fail-fast: false
+      matrix:
+        python-version:
+        - 3.6
+        - 3.7
+        - 3.8
+        - 3.9
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -r test-requirements.txt
+    - name: "Install dependencies and binaries"
+      run: |
+        mkdir -p $HOME/opt/local/bin
+        export PATH=$HOME/opt/local/bin:$PATH
+        pushd /tmp/
+        git clone https://github.com/rofl0r/proxychains-ng.git
+        cd proxychains-ng
+        ./configure --prefix=$HOME/opt/local
+        make -j2
+        make install
+        popd
+        pip install shadowsocks
+        cp scripts/slackbot-test-ctl $HOME/opt/local/bin
+    - name: "Run slackbot test"
+      run: |
+        export PATH=$HOME/opt/local/bin:$PATH
+        slackbot-test-ctl init
+        slackbot-test-ctl startproxy
+    - name: Test with pycodestyle
+      run: pycodestyle oncall_slackbot
+      #TODO Fix pylint errors
+#    - name: Test with pylint
+#      run: pylint oncall_slackbot
+    - name: Test with pytest
+      run: pytest --junitxml=test-reports/test-results.xml
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action/composite@v1
+      if: github.event_name == 'push' && always()
+      with:
+        files: test-reports/test-results.xml
+        check_name: "Test Results ${{ matrix.python-version }}"
+  publish-pypi:
+    if: github.repository == 'bluesliverx/oncall-slackbot'
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        # Fetch all history in order to get the commit count for the version in setup.py
+        fetch-depth: 0
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.8
+    - name: Remove version file
+      # This is just in case something else created it, destroy it so we'll get a fresh version
+      run: rm -f oncall_slackbot/VERSION
+    - name: Install wheel
+      run: pip install wheel
+    - name: Build
+      run: python setup.py sdist bdist_wheel
+    - name: Check upload
+      run: pip install twine && twine check dist/*
+    - name: Publish to PyPi
+      # Only publish if this was a push
+      if: github.event_name == 'push'
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_TOKEN }}
+  publish-docker:
+    if: github.repository == 'bluesliverx/oncall-slackbot'
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        docker-info:
+        - images: |
+            ghcr.io/bksaville/oncall-slackbot
+            ghcr.io/bksaville/oncall-slackbot-base
+          dockerfile: Dockerfile
+        - images: |
+            ghcr.io/bksaville/oncall-slackbot-bot
+          dockerfile: Dockerfile-bot
+    steps:
+    - uses: actions/checkout@v2
+    - name: Docker Tags
+      id: docker_tags
+      uses: docker/metadata-action@v3
+      with:
+        images: ${{ matrix.docker-info.images }}
+        # Always include latest tag
+        flavor: |
+          latest=true
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v1
+      with:
+        platforms: linux/amd64,linux/arm64
+    # Buildx is used to build multi-platform images
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+    # Login to the docker registry
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v1
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and Push Image
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: ${{ matrix.docker-info.dockerfile }}
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ steps.docker_tags.outputs.tags }}
+        labels: ${{ steps.docker_tags.outputs.labels }}

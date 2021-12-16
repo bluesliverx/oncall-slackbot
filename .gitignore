@@ -16,3 +16,6 @@ slackbot_test_settings.py
 .cache
 /.vscode/
 yuri-data
+
+# This is generated on every build
+oncall_slackbot/VERSION
