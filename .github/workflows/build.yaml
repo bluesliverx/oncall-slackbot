@@ -85,28 +85,19 @@ jobs:
       with:
         user: __token__
         password: ${{ secrets.PYPI_TOKEN }}
-  publish-docker:
+  publish-docker-base:
     if: github.repository == 'bluesliverx/oncall-slackbot'
     runs-on: ubuntu-latest
     needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        docker-info:
-        - images: |
-            ghcr.io/bksaville/oncall-slackbot
-            ghcr.io/bksaville/oncall-slackbot-base
-          dockerfile: Dockerfile
-        - images: |
-            ghcr.io/bksaville/oncall-slackbot-bot
-          dockerfile: Dockerfile-bot
     steps:
     - uses: actions/checkout@v2
     - name: Docker Tags
       id: docker_tags
       uses: docker/metadata-action@v3
       with:
-        images: ${{ matrix.docker-info.images }}
+        images: |
+          ghcr.io/bksaville/oncall-slackbot
+          ghcr.io/bksaville/oncall-slackbot-base
         # Always include latest tag
         flavor: |
           latest=true
@@ -128,7 +119,43 @@ jobs:
       uses: docker/build-push-action@v2
       with:
         context: .
-        file: ${{ matrix.docker-info.dockerfile }}
+        push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ steps.docker_tags.outputs.tags }}
+        labels: ${{ steps.docker_tags.outputs.labels }}
+  publish-docker-bot:
+    if: github.repository == 'bluesliverx/oncall-slackbot'
+    runs-on: ubuntu-latest
+    needs: publish-docker-base
+    steps:
+    - uses: actions/checkout@v2
+    - name: Docker Tags
+      id: docker_tags
+      uses: docker/metadata-action@v3
+      with:
+        images: ghcr.io/bksaville/oncall-slackbot-bot
+        # Always include latest tag
+        flavor: |
+          latest=true
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v1
+      with:
+        platforms: linux/amd64,linux/arm64
+    # Buildx is used to build multi-platform images
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+    # Login to the docker registry
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v1
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Build and Push Image
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: Dockerfile-bot
         push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         platforms: linux/amd64,linux/arm64
         tags: ${{ steps.docker_tags.outputs.tags }}
