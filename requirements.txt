@@ -4,4 +4,4 @@ slackbot==0.5.5
 pygerduty>=0.38.2
 pytz>=2019.3
 humanize>=0.5.1
-spacy==3.2.1
+spacy==2.2.3

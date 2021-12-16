@@ -1,5 +1,5 @@
-FROM python:3.7-alpine
-RUN apk --no-cache add gcc musl-dev g++
+FROM python:3.7
+RUN apt-get install -y gcc musl-dev g++ && apt-get clean
 RUN pip install -U pip Cython wheel setuptools
 COPY requirements.txt /tmp/
 RUN pip install -r /tmp/requirements.txt
