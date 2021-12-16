@@ -1,6 +1,6 @@
 FROM python:3.7-alpine
 RUN apk --no-cache add gcc musl-dev g++
-RUN pip install -U pip Cython
+RUN pip install -U pip Cython wheel
 COPY requirements.txt /tmp/
 RUN pip install -r /tmp/requirements.txt
 RUN mkdir -p /app/oncall_slackbot /app/slacker_blocks /training
