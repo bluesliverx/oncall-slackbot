@@ -1,9 +1,5 @@
 # -*- coding: utf-8 -*-
 
-# Import all slackbot settings as well, this also handles loading env vars, etc
-from slackbot.settings import *
-
-
 '''
 Pager duty configuration, these are optional but both must be specified in
 order to enable pager duty integration.
@@ -24,6 +20,10 @@ PAGERDUTY_USERNAME_EMAIL_DOMAIN = None
 Spacy configuration, this is optional
 '''
 SPACY_MODEL = None
+
+# Import all slackbot settings as well, this also handles loading env vars, etc
+# DO NOT MOVE THIS - IT WILL BREAK THINGS
+from slackbot.settings import *  # noqa
 
 if PLUGINS == ['slackbot.plugins']:
     # Override default plugins
