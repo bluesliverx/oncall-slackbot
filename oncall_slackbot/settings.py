@@ -23,7 +23,7 @@ SPACY_MODEL = None
 
 # Import all slackbot settings as well, this also handles loading env vars, etc
 # DO NOT MOVE THIS - IT WILL BREAK THINGS
-from slackbot.settings import *  # pylint: disable=wrong-import-position)
+from slackbot.settings import *  # noqa
 
 if PLUGINS == ['slackbot.plugins']:
     # Override default plugins
