@@ -35,6 +35,8 @@ class BlocksSlackClient(slackclient.SlackClient):
         reply = self.webapi.rtm.connect().body
         time.sleep(1)
         self.parse_slack_login_data(reply)
+        # this prevents the client from connecting twice initially (bug in slackbot module)
+        self.connected = True
 
     def send_message(self, channel, message, attachments=None, blocks=None, as_user=True, thread_ts=None):
         self.webapi.chat.post_message(
@@ -52,8 +54,6 @@ class BlocksSlackClient(slackclient.SlackClient):
         self.login_data = login_data
         self.domain = self.login_data['team']['domain']
         self.username = self.login_data['self']['name']
-        self.parse_user_data(self.webapi.users.list().body['members'])
-        self.parse_channel_data(self.webapi.conversations.list().body['channels'])
 
         proxy, proxy_port, no_proxy = None, None, None
         if 'http_proxy' in os.environ:
@@ -65,3 +65,34 @@ class BlocksSlackClient(slackclient.SlackClient):
                                            http_proxy_port=proxy_port, http_no_proxy=no_proxy)
 
         self.websocket.sock.setblocking(0)
+
+        logger.debug('Getting users')
+        next_cursor = None
+        while next_cursor != '':
+            res = self.webapi.users.list(cursor=next_cursor)
+            self._parse_user_data(res.body['members'])
+            next_cursor = res.body['response_metadata']['next_cursor']
+
+        logger.debug('Getting channels')
+        next_cursor = None
+        while next_cursor != '':
+            res = self.webapi.conversations.list(
+                cursor=next_cursor,
+                limit=1000,
+                exclude_archived=True,
+                types="public_channel,private_channel"
+            )
+            self._parse_channel_data(res.body['channels'])
+            next_cursor = res.body['response_metadata']['next_cursor']
+
+    def _parse_user_data(self, user_data):
+        # prevent web socket timeout
+        self.ping()
+        logger.debug('Adding %d users', len(user_data))
+        self.parse_user_data(user_data=user_data)
+
+    def _parse_channel_data(self, channel_data):
+        # prevent web socket timeout
+        self.ping()
+        logger.debug('Adding %d channels', len(channel_data))
+        self.parse_channel_data(channel_data=channel_data)
