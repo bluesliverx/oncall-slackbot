@@ -1,98 +1,178 @@
 # -*- coding: utf-8 -*-
 
+from __future__ import print_function, absolute_import
 import os
-import time
+import json
 import logging
+import time
 
-from websocket import create_connection
-
-import slacker_blocks
-from slackbot import slackclient
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
+from slack_sdk.rtm_v2 import RTMClient
 
 logger = logging.getLogger(__name__)
 
 
-class BlocksSlackClient(slackclient.SlackClient):
-    """
-    Overrides to support blocks in calls.
-    """
+# pylint: disable=too-many-instance-attributes
+class SlackClient:
+    # pylint: disable=too-many-arguments
+    def __init__(self, token, timeout=None, bot_icon=None, bot_emoji=None, connect=True,
+                 rtm_start_args=None, rtm_handlers=None):
+        self.token = token
+        self.bot_icon = bot_icon
+        self.bot_emoji = bot_emoji
+        self.username = None
+        self.domain = None
+        self.login_data = None
+        self.users = {}
+        self.channels = {}
+        self.connected = False
+        self.rtm_start_args = rtm_start_args
 
-    def __init__(self, token, timeout=None, bot_icon=None, bot_emoji=None, connect=True):
-        super(BlocksSlackClient, self).__init__(
-            # Never connect since we'll do that here
-            token, timeout=timeout, bot_icon=bot_icon, bot_emoji=bot_emoji, connect=False
-        )
-        # Replace the webapi with the blocks-supporting version
         if timeout is None:
-            self.webapi = slacker_blocks.Slacker(self.token)
+            self.rtm = RTMClient(token=self.token)
         else:
-            self.webapi = slacker_blocks.Slacker(self.token, timeout=timeout)
+            self.rtm = RTMClient(token=self.token, timeout=timeout, on_message_listeners=rtm_handlers)
+
+        rate_limit_handler = RateLimitErrorRetryHandler(max_retry_count=100)
+        # Enable rate limited error retries
+        self.rtm.web_client.retry_handlers.append(rate_limit_handler)
 
         if connect:
             self.rtm_connect()
 
+    def start(self):
+        self.rtm.start()
+
     def rtm_connect(self):
-        reply = self.webapi.rtm.connect().body
-        time.sleep(1)
+        reply = self.rtm.web_client.rtm_connect()
         self.parse_slack_login_data(reply)
-        # this prevents the client from connecting twice initially (bug in slackbot module)
         self.connected = True
 
-    def send_message(self, channel, message, attachments=None, blocks=None, as_user=True, thread_ts=None):
-        self.webapi.chat.post_message(
-                channel,
-                message,
-                username=self.login_data['self']['name'],
-                icon_url=self.bot_icon,
-                icon_emoji=self.bot_emoji,
-                attachments=attachments,
-                blocks=blocks,
-                as_user=as_user,
-                thread_ts=thread_ts)
+    def reconnect(self):
+        while True:
+            try:
+                self.rtm_connect()
+                logger.warning('reconnected to slack rtm websocket')
+                return
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.exception('failed to reconnect: %s', exc)
+                time.sleep(5)
 
     def parse_slack_login_data(self, login_data):
         self.login_data = login_data
         self.domain = self.login_data['team']['domain']
         self.username = self.login_data['self']['name']
 
-        proxy, proxy_port, no_proxy = None, None, None
-        if 'http_proxy' in os.environ:
-            proxy, proxy_port = os.environ['http_proxy'].split(':')
-        if 'no_proxy' in os.environ:
-            no_proxy = os.environ['no_proxy']
-
-        self.websocket = create_connection(self.login_data['url'], http_proxy_host=proxy,
-                                           http_proxy_port=proxy_port, http_no_proxy=no_proxy)
-
-        self.websocket.sock.setblocking(0)
-
         logger.debug('Getting users')
-        next_cursor = None
-        while next_cursor != '':
-            res = self.webapi.users.list(cursor=next_cursor)
-            self._parse_user_data(res.body['members'])
-            next_cursor = res.body['response_metadata']['next_cursor']
-
+        for page in self.rtm.web_client.users_list(limit=200):
+            self.parse_user_data(page['members'])
         logger.debug('Getting channels')
-        next_cursor = None
-        while next_cursor != '':
-            res = self.webapi.conversations.list(
-                cursor=next_cursor,
-                limit=1000,
+        for page in self.rtm.web_client.conversations_list(
                 exclude_archived=True,
-                types="public_channel,private_channel"
-            )
-            self._parse_channel_data(res.body['channels'])
-            next_cursor = res.body['response_metadata']['next_cursor']
+                types="public_channel,private_channel",
+                limit=1000
+        ):
+            self.parse_channel_data(page['channels'])
 
-    def _parse_user_data(self, user_data):
-        # prevent web socket timeout
-        self.ping()
+    def parse_channel_data(self, channel_data):
+        logger.debug('Adding %d users', len(channel_data))
+        self.channels.update({c['id']: c for c in channel_data})
+
+    def parse_user_data(self, user_data):
         logger.debug('Adding %d users', len(user_data))
-        self.parse_user_data(user_data=user_data)
+        self.users.update({u['id']: u for u in user_data})
 
-    def _parse_channel_data(self, channel_data):
-        # prevent web socket timeout
-        self.ping()
-        logger.debug('Adding %d channels', len(channel_data))
-        self.parse_channel_data(channel_data=channel_data)
+    def send_to_rtm(self, data):
+        """Send (data) directly to the RTMClient."""
+        data = json.dumps(data)
+        self.rtm.send(data)
+
+    def rtm_send_message(self, channel, message, attachments=None, thread_ts=None):
+        message_json = {
+            'type': 'message',
+            'channel': channel,
+            'text': message,
+            'attachments': attachments,
+            'thread_ts': thread_ts,
+            }
+        self.send_to_rtm(message_json)
+
+    def upload_file(self, channel, fname, fpath, comment):
+        fname = fname or os.path.basename(fpath)
+        self.rtm.web_client.files_upload(
+            file=fpath,
+            channels=channel,
+            filename=fname,
+            initial_comment=comment)
+
+    def upload_content(self, channel, fname, content, comment):
+        self.rtm.web_client.files_upload(
+            channels=channel,
+            content=content,
+            filename=fname,
+            initial_comment=comment)
+
+    # pylint: disable=too-many-arguments
+    def send_message(self, channel, message, attachments=None, blocks=None, as_user=True, thread_ts=None):
+        self.rtm.web_client.chat_postMessage(
+            channel=channel,
+            text=message,
+            username=self.login_data['self']['name'],
+            icon_url=self.bot_icon,
+            icon_emoji=self.bot_emoji,
+            attachments=attachments,
+            blocks=blocks,
+            as_user=as_user,
+            thread_ts=thread_ts)
+
+    def get_channel(self, channel_id):
+        return Channel(self, self.channels[channel_id])
+
+    def open_dm_channel(self, user_id):
+        return self.rtm.web_client.conversations_open(users=[user_id])["channel"]["id"]
+
+    def find_channel_by_name(self, channel_name):
+        for channel_id, channel in self.channels.items():
+            try:
+                name = channel['name']
+            except KeyError:
+                name = self.users[channel['user']]['name']
+            if name == channel_name:
+                return channel_id
+        return None
+
+    def get_user(self, user_id):
+        return self.users.get(user_id)
+
+    def find_user_by_name(self, username):
+        for userid, user in self.users.items():
+            if user['name'] == username:
+                return userid
+        return None
+
+    def react_to_message(self, emojiname, channel, timestamp):
+        self.rtm.web_client.reactions_add(
+            name=emojiname,
+            channel=channel,
+            timestamp=timestamp)
+
+
+class SlackConnectionError(Exception):
+    pass
+
+
+class Channel:
+    def __init__(self, slackclient, body):
+        self._body = body
+        self._client = slackclient
+
+    def __eq__(self, compare_str):
+        name = self._body['name']
+        cid = self._body['id']
+        return compare_str in [name, f"#{name}", cid]
+
+    def upload_file(self, fname, fpath, initial_comment=''):
+        self._client.upload_file(self._body['id'], fname, fpath, initial_comment)
+
+    def upload_content(self, fname, content, initial_comment=''):
+        self._client.upload_content(self._body['id'], fname, content, initial_comment)

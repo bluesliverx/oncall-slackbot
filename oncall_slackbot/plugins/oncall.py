@@ -1,12 +1,11 @@
+# -*- coding: utf-8 -*-
 
 import logging
 import re
 from typing import Optional
-from pygerduty.v2 import ContactMethod, User
-from slackbot.bot import listen_to
-from oncall_slackbot.dispatcher import OnCallMessage
+from pygerduty.v2 import ContactMethod  # pylint: disable=import-error
+from oncall_slackbot.bot import listen_to, Message
 from oncall_slackbot.integrations import pagerduty
-
 
 LOGGER = logging.getLogger(__name__)
 CONTACT_METHOD_EMOTICON_BY_TYPE = {
@@ -29,7 +28,7 @@ def _get_contact_method_message(contact_method: ContactMethod, add_label: bool) 
 
 
 @listen_to(r'who is (?:currently )?on(?:-| |)call', re.IGNORECASE)
-def who_is_on_call(message: OnCallMessage):
+def who_is_on_call(message: Message):
     if not pagerduty.is_configured():
         LOGGER.debug('Pager duty settings are not configured, cannot retrieve current on call')
         return
