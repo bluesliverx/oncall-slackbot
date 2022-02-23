@@ -1,18 +1,19 @@
+# -*- coding: utf-8 -*-
 
 import logging
-import spacy
-from spacy.language import Doc, Language
-from oncall_slackbot import settings
 from typing import Optional
+import spacy  # pylint: disable=import-error
+from spacy.language import Doc, Language  # pylint: disable=import-error
+from oncall_slackbot import settings
 
 
 LOGGER = logging.getLogger(__name__)
 
-_nlp = None
+_NLP = None
 
 
 def is_configured() -> bool:
-    return not not settings.SPACY_MODEL
+    return not not settings.SPACY_MODEL  # pylint: disable=unneeded-not
 
 
 def _initialize_textcat(nlp: Language) -> None:
@@ -28,15 +29,15 @@ def _initialize_textcat(nlp: Language) -> None:
 
 
 def _get_nlp() -> Optional[Language]:
-    global _nlp
+    global _NLP  # pylint: disable=global-statement
     if not is_configured():
         return None
-    if not _nlp:
-        LOGGER.debug(f'Loading spacy model from {settings.SPACY_MODEL}')
-        _nlp = spacy.load(settings.SPACY_MODEL)
-        _initialize_textcat(_nlp)
-        LOGGER.info(f'Initialized spacy nlp backend from model {settings.SPACY_MODEL}')
-    return _nlp
+    if not _NLP:
+        LOGGER.debug('Loading spacy model from %s', settings.SPACY_MODEL)
+        _NLP = spacy.load(settings.SPACY_MODEL)
+        _initialize_textcat(_NLP)
+        LOGGER.info('Initialized spacy nlp backend from model %s', settings.SPACY_MODEL)
+    return _NLP
 
 
 def get_doc(message_text: str) -> Optional[Doc]:

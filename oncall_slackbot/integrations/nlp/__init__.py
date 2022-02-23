@@ -1,9 +1,10 @@
+# -*- coding: utf-8 -*-
 
-from oncall_slackbot.integrations.nlp import spacy as nlp_spacy
 from typing import Optional
+from oncall_slackbot.integrations.nlp import spacy as nlp_spacy
 
 
-def _noop_generate_label(message_text: str) -> Optional[str]:
+def _noop_generate_label(message_text: str) -> Optional[str]:  # pylint: disable=unused-argument
     return None
 
 

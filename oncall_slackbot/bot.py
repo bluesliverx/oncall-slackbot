@@ -1,41 +1,402 @@
 # -*- coding: utf-8 -*-
+
+from __future__ import absolute_import
 import logging
 import re
-from oncall_slackbot.integrations import nlp
-from slackbot import bot, manager
-from oncall_slackbot.slackclient import BlocksSlackClient
-from oncall_slackbot.dispatcher import OnCallMessageDispatcher
+import json
+import traceback
+from functools import wraps
 from oncall_slackbot import settings
+from oncall_slackbot.utils import WorkerPool
+from oncall_slackbot.manager import PluginsManager
+from oncall_slackbot.slackclient import SlackClient
+
+from oncall_slackbot.integrations import nlp
 
 logger = logging.getLogger(__name__)
 
 
-class OnCallBot(bot.Bot):
-    """
-    Override to instantiate custom versions of objects.
-    """
+class Bot:
     def __init__(self):
-        # Do not call super init since we are going to override everything anyways
-        self._client = BlocksSlackClient(
+        alias_regex = ''
+        if getattr(settings, 'ALIASES', None):
+            logger.info('using aliases %s', settings.ALIASES)
+            alias_regex = '|(?P<alias>{})'.format('|'.join([re.escape(s) for s in settings.ALIASES.split(',')]))
+
+        self.at_message_matcher = re.compile(
+            fr'^(?:\<@(?P<atuser>\w+)\>:?|(?P<username>\w+):{alias_regex}) ?(?P<text>[\s\S]*)$'
+        )
+
+        self._pool = WorkerPool(self.dispatch_msg)
+
+        # pylint: disable=no-member
+        self._client = SlackClient(
             settings.API_TOKEN,
             timeout=settings.TIMEOUT if hasattr(settings, 'TIMEOUT') else None,
             bot_icon=settings.BOT_ICON if hasattr(settings, 'BOT_ICON') else None,
-            bot_emoji=settings.BOT_EMOJI if hasattr(settings, 'BOT_EMOJI') else None
+            bot_emoji=settings.BOT_EMOJI if hasattr(settings, 'BOT_EMOJI') else None,
+            rtm_handlers=[self.handle_message]
         )
-        self._plugins = manager.PluginsManager()
-        # Load all plugins
-        for plugin in settings.PLUGINS:
-            self._plugins._load_plugins(plugin)
-        self._dispatcher = OnCallMessageDispatcher(self._client, self._plugins, settings.ERRORS_TO)
+
+        errors_to = settings.ERRORS_TO
+        self._errors_to = None
+        if errors_to:
+            self._errors_to = self._client.find_channel_by_name(errors_to)
+            if not self._errors_to:
+                raise ValueError('Could not find errors_to recipient {!r}'.format(errors_to))
+
+        self._plugins = PluginsManager()
+
+    def dispatch_msg(self, msg):
+        if len(msg) > 2:
+            override_match_text = msg[2]
+        else:
+            override_match_text = None
+
+        category = msg[0]
+        msg = msg[1]
+
+        if not self._dispatch_msg_handler(category, msg, override_match_text):
+            # TODO Fix this for both nlp and non-nlp responds. For now I'm leaving it as the default behavior
+            #   of only handling non-nlp responds for the default reply
+            # Send the default reply if nlp doesn't respond with anything
+            # and there is an nlp label and this is for an nlp label match
+            # or if there is no nlp label and this is not for an nlp label match
+            # NOTE: This isn't really ideal as respond_to could respond with something when nlp_respond_to did not
+            #   but it is a stop-gap that should work most of the time since most won't be combining nlp with non-nlp
+            #   plugins I would imagine
+            # if (category == 'respond_to' and not msg.get('nlp_label')) or \
+            #         (category == 'nlp_label_respond_to' and msg.get('nlp_label')):
+            #     if not self._dispatch_msg_handler_override('default_reply', msg, override_match_text):
+            #         self._default_reply(msg)
+            if category == 'respond_to':
+                if not self._dispatch_msg_handler('default_reply', msg):
+                    self._default_reply(msg)
+
+    def _dispatch_msg_handler(self, category, msg, override_match_text=None):
+        responded = False
+        match_text = override_match_text or msg.get('text', None)
+        for func, args in self._plugins.get_plugins(category, match_text):
+            if func:
+                responded = True
+                try:
+                    func(Message(self._client, msg), *args)
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('failed to handle message %s with plugin "%s"', msg['text'], func.__name__)
+                    reply = f'[{func.__name__}] I had a problem handling "{msg["text"]}"\n'
+                    _tb = f'```\n{traceback.format_exc()}\n```'
+                    if self._errors_to:
+                        self._client.rtm_send_message(msg['channel'], reply)
+                        self._client.rtm_send_message(self._errors_to, f'{reply}\n{_tb}')
+                    else:
+                        self._client.rtm_send_message(msg['channel'], f'{reply}\n{_tb}')
+        return responded
+
+    def filter_text(self, msg):
+        full_text = msg.get('text', '') or ''
+        channel = msg['channel']
+        bot_name = self._get_bot_name()
+        bot_id = self._get_bot_id()
+        _msg = self.at_message_matcher.match(full_text)
+
+        if channel[0] == 'C' or channel[0] == 'G':
+            if not _msg:
+                return None
+
+            matches = _msg.groupdict()
+
+            atuser = matches.get('atuser')
+            username = matches.get('username')
+            text = matches.get('text')
+            alias = matches.get('alias')
+
+            if alias:
+                atuser = bot_id
+
+            if atuser != bot_id and username != bot_name:
+                # a channel message at other user
+                return None
+
+            logger.debug('got an AT message: %s', text)
+            msg['text'] = text
+        else:
+            if _msg:
+                msg['text'] = _msg.groupdict().get('text', None)
+        return msg
+
+    def _get_bot_id(self):
+        return self._client.login_data['self']['id']
+
+    def _get_bot_name(self):
+        return self._client.login_data['self']['name']
+
+    def _on_new_message(self, msg):
+        # ignore edits
+        subtype = msg.get('subtype', '')
+        if subtype == 'message_changed':
+            return
+
+        botname = self._get_bot_name()
+        try:
+            msguser = self._client.users.get(msg['user'])
+            username = msguser['name']
+        except (KeyError, TypeError):
+            if 'username' in msg:
+                username = msg['username']
+            elif 'bot_profile' in msg and 'name' in msg['bot_profile']:
+                username = msg['bot_profile']['name']
+            else:
+                return
+
+        if username in [botname, 'slackbot']:
+            return
+
+        msg_respond_to = self.filter_text(msg)
+        if msg_respond_to:
+            self._pool.add_task(('respond_to', msg_respond_to))
+        else:
+            self._pool.add_task(('listen_to', msg))
+
+    def _default_reply(self, msg):
+        _default_reply = settings.DEFAULT_REPLY
+        if _default_reply is None:
+            _default_reply = [f"Bad command \"{msg['text']}\", You can ask me one of the following questions:\n"]
+            _default_reply += [
+                f'    • `{p.pattern}` {v.__doc__ or ""}'
+                for p, v in self._plugins.commands['respond_to'].items()
+            ]
+            _default_reply = '\n'.join(_default_reply)
+
+        _msg = Message(self._client, msg)
+        _msg.reply(_default_reply)
+
+    def handle_message(self, event: str):
+        event = json.loads(event)
+        event_type = event.get('type')
+        if event_type == 'message':
+            self._on_new_message(event)
+        elif event_type in ['channel_created', 'channel_rename',
+                            'group_joined', 'group_rename',
+                            'im_created']:
+            channel = [event['channel']]
+            self._client.parse_channel_data(channel)
+        elif event_type in ['team_join', 'user_change']:
+            user = [event['user']]
+            self._client.parse_user_data(user)
+
+    def run(self):
+        self._plugins.init_plugins()
+        self._pool.start()
+        if not self._client.connected:
+            self._client.rtm_connect()
+
+        logger.info('connected to slack RTM api')
+        self._client.start()
+
+
+def respond_to(matchstr, flags=0):
+    def wrapper(func):
+        PluginsManager.commands['respond_to'][
+            re.compile(matchstr, flags)] = func
+        logger.info('registered respond_to plugin "%s" to "%s"', func.__name__, matchstr)
+        return func
+
+    return wrapper
+
+
+def listen_to(matchstr, flags=0):
+    def wrapper(func):
+        PluginsManager.commands['listen_to'][
+            re.compile(matchstr, flags)] = func
+        logger.info('registered listen_to plugin "%s" to "%s"', func.__name__, matchstr)
+        return func
+
+    return wrapper
+
+
+# def default_reply(matchstr=r'^.*$', flags=0):
+def default_reply(*args, **kwargs):
+    """
+    Decorator declaring the wrapped function to the default reply hanlder.
+
+    May be invoked as a simple, argument-less decorator (i.e. ``@default_reply``) or
+    with arguments customizing its behavior (e.g. ``@default_reply(matchstr='pattern')``).
+    """
+    invoked = bool(not args or kwargs)
+    matchstr = kwargs.pop('matchstr', r'^.*$')
+    flags = kwargs.pop('flags', 0)
+
+    if not invoked:
+        func = args[0]
+
+    def wrapper(func):
+        PluginsManager.commands['default_reply'][
+            re.compile(matchstr, flags)] = func
+        logger.info('registered default_reply plugin "%s" to "%s"', func.__name__,
+                    matchstr)
+        return func
+
+    return wrapper if invoked else wrapper(func)
+
+
+def unicode_compact(func):
+    """
+    Make sure the first parameter of the decorated method to be a unicode
+    object.
+    """
+
+    @wraps(func)
+    def wrapped(self, text, *a, **kw):
+        if not isinstance(text, str):
+            text = text.decode('utf-8')
+        return func(self, text, *a, **kw)
+
+    return wrapped
+
+
+class Message:
+    def __init__(self, slackclient, body):
+        self._client = slackclient
+        self._body = body
+        self._plugins = PluginsManager()
+
+    def _get_user_id(self):
+        if 'user' in self._body:
+            return self._body['user']
+
+        return self._client.find_user_by_name(self._body['username'])
+
+    @unicode_compact
+    def _gen_at_message(self, text):
+        text = '<@{}>: {}'.format(self._get_user_id(), text)
+        return text
+
+    @unicode_compact
+    def gen_reply(self, text):
+        chan = self._body['channel']
+        if chan.startswith('C') or chan.startswith('G'):
+            return self._gen_at_message(text)
+        return text
+
+    # pylint: disable=too-many-arguments
+    @unicode_compact
+    def reply_webapi(self, text, attachments=None, blocks=None, as_user=True, in_thread=None):
+        """
+            Send a reply to the sender using Web API
+
+            (This function supports formatted message
+            when using a bot integration)
+
+            If the message was sent in a thread, answer in a thread per default.
+        """
+        if in_thread is None:
+            in_thread = 'thread_ts' in self.body
+
+        if in_thread:
+            self.send_webapi(text, attachments=attachments, blocks=blocks, as_user=as_user, thread_ts=self.thread_ts)
+        else:
+            text = self.gen_reply(text)
+            self.send_webapi(text, attachments=attachments, blocks=blocks, as_user=as_user)
+
+    # pylint: disable=too-many-arguments
+    @unicode_compact
+    def send_webapi(self, text, attachments=None, blocks=None, as_user=True, thread_ts=None):
+        """
+            Send a reply using Web API
+            (This function supports formatted message
+            when using a bot integration)
+        """
+        self._client.send_message(
+            self._body['channel'],
+            text,
+            attachments=attachments,
+            blocks=blocks,
+            as_user=as_user,
+            thread_ts=thread_ts)
+
+    @unicode_compact
+    def reply(self, text, in_thread=None):
+        """
+            Send a reply to the sender using RTM API
+
+            (This function doesn't supports formatted message
+            when using a bot integration)
+
+            If the message was send in a thread, answer in a thread per default.
+        """
+        if in_thread is None:
+            in_thread = 'thread_ts' in self.body
+
+        if in_thread:
+            self.send(text, thread_ts=self.thread_ts)
+        else:
+            text = self.gen_reply(text)
+            self.send(text)
+
+    @unicode_compact
+    def direct_reply(self, text):
+        """
+            Send a reply via direct message using RTM API
+
+        """
+        channel_id = self._client.open_dm_channel(self._get_user_id())
+        self._client.rtm_send_message(channel_id, text)
+
+    @unicode_compact
+    def send(self, text, thread_ts=None):
+        """
+            Send a reply using RTM API
+
+            (This function doesn't supports formatted message
+            when using a bot integration)
+        """
+        self._client.rtm_send_message(self._body['channel'], text, thread_ts=thread_ts)
+
+    def react(self, emojiname):
+        """
+           React to a message using the web api
+        """
+        self._client.react_to_message(
+            emojiname=emojiname,
+            channel=self._body['channel'],
+            timestamp=self._body['ts'])
+
+    @property
+    def channel(self):
+        return self._client.get_channel(self._body['channel'])
+
+    @property
+    def body(self):
+        return self._body
+
+    @property
+    def user(self):
+        return self._client.get_user(self._body['user'])
+
+    @property
+    def thread_ts(self):
+        try:
+            thread_ts = self.body['thread_ts']
+        except KeyError:
+            thread_ts = self.body['ts']
+
+        return thread_ts
+
+    def docs_reply(self):
+        reply = [
+            f'    • `{v.__name__}` {v.__doc__}'
+            for _, v in self._plugins.commands['respond_to'].items()
+        ]
+        return '\n'.join(reply)
 
 
 def nlp_label_respond_to(match_label, flags=0):
     def wrapper(func):
         if nlp.is_backend_present():
-            manager.PluginsManager.commands['nlp_label_respond_to'][re.compile(match_label, flags)] = func
-            logger.info(f'registered nlp_label_respond_to plugin "{func.__name__}" to "{match_label}"')
+            PluginsManager.commands['nlp_label_respond_to'][re.compile(match_label, flags)] = func
+            logger.info('registered nlp_label_respond_to plugin "%s" to "%s"', func.__name__, match_label)
         else:
-            logger.warning(f'no NLP backend is configured to handle nlp_label_respond_to for "{func.__name__}"')
+            logger.warning('no NLP backend is configured to handle nlp_label_respond_to for "%s"', func.__name__)
         return func
 
     return wrapper
@@ -44,17 +405,17 @@ def nlp_label_respond_to(match_label, flags=0):
 def nlp_label_listen_to(match_label, flags=0):
     def wrapper(func):
         if nlp.is_backend_present():
-            manager.PluginsManager.commands['nlp_label_listen_to'][re.compile(match_label, flags)] = func
-            logger.info(f'registered nlp_label_listen_to plugin "{func.__name__}" to "{match_label}"')
+            PluginsManager.commands['nlp_label_listen_to'][re.compile(match_label, flags)] = func
+            logger.info('registered nlp_label_listen_to plugin "%s" to "%s"', func.__name__, match_label)
         else:
-            logger.warning(f'no NLP backend is configured to handle nlp_label_listen_to for "{func.__name__}"')
+            logger.warning('no NLP backend is configured to handle nlp_label_listen_to for "%s"', func.__name__)
         return func
 
     return wrapper
 
 
 if nlp.is_backend_present():
-    if 'nlp_label_respond_to' not in manager.PluginsManager.commands:
-        manager.PluginsManager.commands['nlp_label_respond_to'] = {}
-    if 'nlp_label_listen_to' not in manager.PluginsManager.commands:
-        manager.PluginsManager.commands['nlp_label_listen_to'] = {}
+    if 'nlp_label_respond_to' not in PluginsManager.commands:
+        PluginsManager.commands['nlp_label_respond_to'] = {}
+    if 'nlp_label_listen_to' not in PluginsManager.commands:
+        PluginsManager.commands['nlp_label_listen_to'] = {}

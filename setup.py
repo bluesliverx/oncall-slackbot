@@ -12,6 +12,7 @@ if os.path.exists(version_file):
         version = fobj.read().strip()
 else:
     # Generate the version and store it in the file
+    # pylint: disable=subprocess-run-check
     result = subprocess.run('git rev-list --count HEAD', shell=True, capture_output=True, encoding='utf8')
     commit_count = result.stdout.strip()
     version = f'{MAJOR_VERSION}.{commit_count}'
@@ -20,22 +21,22 @@ else:
         fobj.write(version)
 
 install_requires = (
-    'slackbot==0.5.5',
     'pygerduty>=0.38.2',
     'pytz>=2019.3',
-    'humanize>=0.5.1',
+    'humanize>=3.14.0',
     'spacy==2.2.3',
+    'slack-sdk>=3.15.1',
 )  # yapf: disable
 
 excludes = (
     '*test*',
     '*local_settings*',
-) # yapf: disable
+)  # yapf: disable
 
 setup(name='oncall-slackbot',
       version=version,
       license='MIT',
-      description='Extended slackbot made specifically to handle on-call requests',
+      description='Slackbot made specifically to handle on-call requests',
       author='Brian Saville',
       author_email='bksaville@gmail.com',
       url='http://github.com/bluesliverx/oncall-slackbot',
@@ -46,9 +47,10 @@ setup(name='oncall-slackbot',
                    'License :: OSI Approved :: MIT License',
                    'Operating System :: OS Independent',
                    'Programming Language :: Python',
-                   'Programming Language :: Python :: 2',
-                   'Programming Language :: Python :: 2.7',
                    'Programming Language :: Python :: 3',
                    'Programming Language :: Python :: 3.4',
                    'Programming Language :: Python :: 3.5',
-                   'Programming Language :: Python :: 3.6'])
+                   'Programming Language :: Python :: 3.6',
+                   'Programming Language :: Python :: 3.7',
+                   ]
+      )

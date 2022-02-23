@@ -1,11 +1,12 @@
+# -*- coding: utf-8 -*-
 
 import logging
 from datetime import datetime
-from pytz import timezone, UTC
 from typing import Optional
-from pygerduty.v2 import PagerDuty, Oncall, User
+from pytz import timezone, UTC
+from pygerduty.v2 import PagerDuty, Oncall, User  # pylint: disable=import-error
+import humanize  # pylint: disable=import-error
 from oncall_slackbot import settings
-import humanize
 
 
 LOGGER = logging.getLogger(__name__)
