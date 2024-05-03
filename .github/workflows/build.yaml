@@ -45,11 +45,8 @@ jobs:
         export PATH=$HOME/opt/local/bin:$PATH
         slackbot-test-ctl init
         slackbot-test-ctl startproxy
-    - name: Test with pycodestyle
-      run: pycodestyle oncall_slackbot
-      #TODO Fix pylint errors
-#    - name: Test with pylint
-#      run: pylint oncall_slackbot
+    - name: Test with pre-commit
+      run: pre-commit run --all-files
     - name: Test with pytest
       run: pytest --junitxml=test-reports/test-results.xml
     - name: Publish test results
