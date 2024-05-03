@@ -26,7 +26,7 @@ install_requires = (
     'pygerduty>=0.38.2',
     'pytz>=2019.3',
     'humanize>=3.14.0',
-    'spacy==2.2.3',
+    'spacy<3',
     'slack-sdk>=3.15.1',
 )  # yapf: disable
 
