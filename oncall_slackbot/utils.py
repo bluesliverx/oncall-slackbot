@@ -11,21 +11,21 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-def download_file(url, fpath, token=''):
-    logger.debug('starting to fetch %s', url)
+def download_file(url, fpath, token=""):
+    logger.debug("starting to fetch %s", url)
     headers = {"Authorization": f"Bearer {token}"} if token else None
     req = requests.get(url, stream=True, headers=headers)
-    with open(fpath, 'wb') as file_handle:
-        for chunk in req.iter_content(chunk_size=1024*64):
+    with open(fpath, "wb") as file_handle:
+        for chunk in req.iter_content(chunk_size=1024 * 64):
             if chunk:  # filter out keep-alive new chunks
                 file_handle.write(chunk)
                 file_handle.flush()
-    logger.debug('fetch %s', fpath)
+    logger.debug("fetch %s", fpath)
     return fpath
 
 
 @contextmanager
-def create_tmp_file(content=''):
+def create_tmp_file(content=""):
     _fd, name = tempfile.mkstemp()
     try:
         if content:
@@ -58,14 +58,14 @@ class WorkerPool:
 def get_http_proxy(environ):
     proxy, proxy_port, no_proxy = None, None, None
 
-    if 'http_proxy' in environ:
-        http_proxy = environ['http_proxy']
-        prefix = 'http://'
+    if "http_proxy" in environ:
+        http_proxy = environ["http_proxy"]
+        prefix = "http://"
         if http_proxy.startswith(prefix):
-            http_proxy = http_proxy[len(prefix):]
-        proxy, proxy_port = http_proxy.split(':')
+            http_proxy = http_proxy[len(prefix) :]
+        proxy, proxy_port = http_proxy.split(":")
 
-    if 'no_proxy' in environ:
-        no_proxy = environ['no_proxy']
+    if "no_proxy" in environ:
+        no_proxy = environ["no_proxy"]
 
     return proxy, proxy_port, no_proxy

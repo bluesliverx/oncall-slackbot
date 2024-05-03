@@ -18,12 +18,12 @@ def is_configured() -> bool:
 
 def _initialize_textcat(nlp: Language) -> None:
     # Ensure that the text categorizer is added to the pipeline
-    if 'textcat' not in nlp.pipe_names:
-        LOGGER.info('Adding the text categorizer to the spacy nlp pipeline')
+    if "textcat" not in nlp.pipe_names:
+        LOGGER.info("Adding the text categorizer to the spacy nlp pipeline")
 
         # nlp.create_pipe works for built-ins that are registered with spaCy
         textcat = nlp.create_pipe(
-            'textcat', config={'exclusive_classes': True, 'architecture': 'simple_cnn'}
+            "textcat", config={"exclusive_classes": True, "architecture": "simple_cnn"}
         )
         nlp.add_pipe(textcat, last=True)
 
@@ -33,10 +33,10 @@ def _get_nlp() -> Optional[Language]:
     if not is_configured():
         return None
     if not _NLP:
-        LOGGER.debug('Loading spacy model from %s', settings.SPACY_MODEL)
+        LOGGER.debug("Loading spacy model from %s", settings.SPACY_MODEL)
         _NLP = spacy.load(settings.SPACY_MODEL)
         _initialize_textcat(_NLP)
-        LOGGER.info('Initialized spacy nlp backend from model %s', settings.SPACY_MODEL)
+        LOGGER.info("Initialized spacy nlp backend from model %s", settings.SPACY_MODEL)
     return _NLP
 
 

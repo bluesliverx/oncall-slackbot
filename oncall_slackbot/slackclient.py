@@ -15,8 +15,16 @@ logger = logging.getLogger(__name__)
 # pylint: disable=too-many-instance-attributes
 class SlackClient:
     # pylint: disable=too-many-arguments
-    def __init__(self, token, timeout=None, bot_icon=None, bot_emoji=None, connect=True,
-                 rtm_start_args=None, rtm_handlers=None):
+    def __init__(
+        self,
+        token,
+        timeout=None,
+        bot_icon=None,
+        bot_emoji=None,
+        connect=True,
+        rtm_start_args=None,
+        rtm_handlers=None,
+    ):
         self.token = token
         self.bot_icon = bot_icon
         self.bot_emoji = bot_emoji
@@ -31,7 +39,9 @@ class SlackClient:
         if timeout is None:
             self.rtm = RTMClient(token=self.token)
         else:
-            self.rtm = RTMClient(token=self.token, timeout=timeout, on_message_listeners=rtm_handlers)
+            self.rtm = RTMClient(
+                token=self.token, timeout=timeout, on_message_listeners=rtm_handlers
+            )
 
         rate_limit_handler = RateLimitErrorRetryHandler(max_retry_count=100)
         # Enable rate limited error retries
@@ -52,35 +62,33 @@ class SlackClient:
         while True:
             try:
                 self.rtm_connect()
-                logger.warning('reconnected to slack rtm websocket')
+                logger.warning("reconnected to slack rtm websocket")
                 return
             except Exception as exc:  # pylint: disable=broad-except
-                logger.exception('failed to reconnect: %s', exc)
+                logger.exception("failed to reconnect: %s", exc)
                 time.sleep(5)
 
     def parse_slack_login_data(self, login_data):
         self.login_data = login_data
-        self.domain = self.login_data['team']['domain']
-        self.username = self.login_data['self']['name']
+        self.domain = self.login_data["team"]["domain"]
+        self.username = self.login_data["self"]["name"]
 
-        logger.debug('Getting users')
+        logger.debug("Getting users")
         for page in self.rtm.web_client.users_list(limit=200):
-            self.parse_user_data(page['members'])
-        logger.debug('Getting channels')
+            self.parse_user_data(page["members"])
+        logger.debug("Getting channels")
         for page in self.rtm.web_client.conversations_list(
-                exclude_archived=True,
-                types="public_channel,private_channel",
-                limit=1000
+            exclude_archived=True, types="public_channel,private_channel", limit=1000
         ):
-            self.parse_channel_data(page['channels'])
+            self.parse_channel_data(page["channels"])
 
     def parse_channel_data(self, channel_data):
-        logger.debug('Adding %d users', len(channel_data))
-        self.channels.update({c['id']: c for c in channel_data})
+        logger.debug("Adding %d users", len(channel_data))
+        self.channels.update({c["id"]: c for c in channel_data})
 
     def parse_user_data(self, user_data):
-        logger.debug('Adding %d users', len(user_data))
-        self.users.update({u['id']: u for u in user_data})
+        logger.debug("Adding %d users", len(user_data))
+        self.users.update({u["id"]: u for u in user_data})
 
     def send_to_rtm(self, data):
         """Send (data) directly to the RTMClient."""
@@ -89,41 +97,46 @@ class SlackClient:
 
     def rtm_send_message(self, channel, message, attachments=None, thread_ts=None):
         message_json = {
-            'type': 'message',
-            'channel': channel,
-            'text': message,
-            'attachments': attachments,
-            'thread_ts': thread_ts,
-            }
+            "type": "message",
+            "channel": channel,
+            "text": message,
+            "attachments": attachments,
+            "thread_ts": thread_ts,
+        }
         self.send_to_rtm(message_json)
 
     def upload_file(self, channel, fname, fpath, comment):
         fname = fname or os.path.basename(fpath)
         self.rtm.web_client.files_upload(
-            file=fpath,
-            channels=channel,
-            filename=fname,
-            initial_comment=comment)
+            file=fpath, channels=channel, filename=fname, initial_comment=comment
+        )
 
     def upload_content(self, channel, fname, content, comment):
         self.rtm.web_client.files_upload(
-            channels=channel,
-            content=content,
-            filename=fname,
-            initial_comment=comment)
+            channels=channel, content=content, filename=fname, initial_comment=comment
+        )
 
     # pylint: disable=too-many-arguments
-    def send_message(self, channel, message, attachments=None, blocks=None, as_user=True, thread_ts=None):
+    def send_message(
+        self,
+        channel,
+        message,
+        attachments=None,
+        blocks=None,
+        as_user=True,
+        thread_ts=None,
+    ):
         self.rtm.web_client.chat_postMessage(
             channel=channel,
             text=message,
-            username=self.login_data['self']['name'],
+            username=self.login_data["self"]["name"],
             icon_url=self.bot_icon,
             icon_emoji=self.bot_emoji,
             attachments=attachments,
             blocks=blocks,
             as_user=as_user,
-            thread_ts=thread_ts)
+            thread_ts=thread_ts,
+        )
 
     def get_channel(self, channel_id):
         return Channel(self, self.channels[channel_id])
@@ -134,9 +147,9 @@ class SlackClient:
     def find_channel_by_name(self, channel_name):
         for channel_id, channel in self.channels.items():
             try:
-                name = channel['name']
+                name = channel["name"]
             except KeyError:
-                name = self.users[channel['user']]['name']
+                name = self.users[channel["user"]]["name"]
             if name == channel_name:
                 return channel_id
         return None
@@ -146,15 +159,14 @@ class SlackClient:
 
     def find_user_by_name(self, username):
         for userid, user in self.users.items():
-            if user['name'] == username:
+            if user["name"] == username:
                 return userid
         return None
 
     def react_to_message(self, emojiname, channel, timestamp):
         self.rtm.web_client.reactions_add(
-            name=emojiname,
-            channel=channel,
-            timestamp=timestamp)
+            name=emojiname, channel=channel, timestamp=timestamp
+        )
 
 
 class SlackConnectionError(Exception):
@@ -167,12 +179,12 @@ class Channel:
         self._client = slackclient
 
     def __eq__(self, compare_str):
-        name = self._body['name']
-        cid = self._body['id']
+        name = self._body["name"]
+        cid = self._body["id"]
         return compare_str in [name, f"#{name}", cid]
 
-    def upload_file(self, fname, fpath, initial_comment=''):
-        self._client.upload_file(self._body['id'], fname, fpath, initial_comment)
+    def upload_file(self, fname, fpath, initial_comment=""):
+        self._client.upload_file(self._body["id"], fname, fpath, initial_comment)
 
-    def upload_content(self, fname, content, initial_comment=''):
-        self._client.upload_content(self._body['id'], fname, content, initial_comment)
+    def upload_content(self, fname, content, initial_comment=""):
+        self._client.upload_content(self._body["id"], fname, content, initial_comment)

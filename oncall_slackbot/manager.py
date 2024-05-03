@@ -14,17 +14,13 @@ class PluginsManager:
     def __init__(self):
         pass
 
-    commands = {
-        'respond_to': {},
-        'listen_to': {},
-        'default_reply': {}
-    }
+    commands = {"respond_to": {}, "listen_to": {}, "default_reply": {}}
 
     def init_plugins(self):
-        if hasattr(settings, 'PLUGINS'):
+        if hasattr(settings, "PLUGINS"):
             plugins = settings.PLUGINS
         else:
-            plugins = 'slackbot.plugins'
+            plugins = "slackbot.plugins"
 
         for plugin in plugins:
             self._load_plugins(plugin)
@@ -39,21 +35,22 @@ class PluginsManager:
             path_name = path_name.origin
 
         module_list = [plugin]
-        if not path_name.endswith('.py'):
-            module_list = glob('{}/[!_]*.py'.format(path_name))
-            module_list = ['.'.join((plugin, os.path.split(f)[-1][:-3])) for f
-                           in module_list]
+        if not path_name.endswith(".py"):
+            module_list = glob("{}/[!_]*.py".format(path_name))
+            module_list = [
+                ".".join((plugin, os.path.split(f)[-1][:-3])) for f in module_list
+            ]
         for module in module_list:
             try:
                 import_module(module)
             except Exception:  # pylint: disable=broad-except
                 # TODO Better exception handling
-                logger.exception('Failed to import %s', module)
+                logger.exception("Failed to import %s", module)
 
     def get_plugins(self, category, text):
         has_matching_plugin = False
         if text is None:
-            text = ''
+            text = ""
         for matcher in self.commands[category]:
             match = matcher.search(text)
             if match:
