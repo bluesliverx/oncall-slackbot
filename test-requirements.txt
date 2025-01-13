@@ -68,7 +68,7 @@ ruff-lsp==0.0.53
     # via -r test-requirements.in
 typing-extensions==4.11.0
     # via ruff-lsp
-virtualenv==20.26.1
+virtualenv==20.26.6
     # via pre-commit
 
 # The following packages are considered to be unsafe in a requirements file:
